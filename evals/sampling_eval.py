@@ -14,8 +14,8 @@ from models.velocity_time_encoder import VelocityTimeEncoder
 
 def eval_generation(
     gen: Generator,
-    conditioning_model: nn.Module,
     cfg: OmegaConf,
+    conditioning_model: nn.Module = None,
     classifier_free_guidance_scale: float = 3.0,
 ):
     batch_size = 2
@@ -29,7 +29,11 @@ def eval_generation(
     dstart_bin = batch["dstart_bin"].to(cfg.train.device)
     duration_bin = batch["duration_bin"].to(cfg.train.device)
 
-    label_emb = conditioning_model(velocity_bin, dstart_bin, duration_bin)
+    if conditioning_model is not None:
+        with torch.no_grad():
+            label_emb = conditioning_model(velocity_bin, dstart_bin, duration_bin)
+    else:
+        label_emb = None
 
     noise = torch.randn(velocity.size()).to(cfg.train.device)
 
@@ -118,6 +122,8 @@ if __name__ == "__main__":
     gen = Generator(model, forward_diffusion)
     gen_ema = Generator(ema_model, forward_diffusion)
 
-    eval_generation(gen, conditioning_model, cfg)
+    eval_generation(gen, cfg, conditioning_model, classifier_free_guidance_scale=3.0)
+
+    eval_generation(gen, cfg, classifier_free_guidance_scale=0)
 
     # eval_generation(gen_ema, conditioning_model, cfg)
