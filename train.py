@@ -150,6 +150,8 @@ def train(cfg: OmegaConf):
             .to(device)
         )
 
+        conditioning_model.load_state_dict(cond_model_ckpt["velocity_time_encoder"])
+
         # freeze layers
         conditioning_model.requires_grad_(False)
 

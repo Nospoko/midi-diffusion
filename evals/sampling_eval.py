@@ -1,7 +1,7 @@
 import torch
 import seaborn as sns
+import torch.nn as nn
 import matplotlib.pyplot as plt
-import torch.nn.functional as F
 from omegaconf import OmegaConf
 from huggingface_hub.file_download import hf_hub_download
 
@@ -9,44 +9,60 @@ from sample import Generator
 from train import preprocess_dataset
 from models.reverse_diffusion import Unet
 from models.forward_diffusion import ForwardDiffusion
+from models.velocity_time_encoder import VelocityTimeEncoder
 
 
-def test_generation(
+def eval_generation(
     gen: Generator,
+    conditioning_model: nn.Module,
     cfg: OmegaConf,
-    batch_size: int = 4,
+    classifier_free_guidance_scale: float = 3.0,
 ):
-    noise = torch.randn((batch_size, 2, 1000)).to(cfg.train.device)
+    batch_size = 2
+    loader, _, _ = preprocess_dataset("JasiekKaczmarczyk/giant-midi-sustain-quantized", batch_size, 1, overfit_single_batch=True)
+
+    batch = next(iter(loader))
+
+    velocity = batch["velocity"]
+
+    velocity_bin = batch["velocity_bin"].to(cfg.train.device)
+    dstart_bin = batch["dstart_bin"].to(cfg.train.device)
+    duration_bin = batch["duration_bin"].to(cfg.train.device)
+
+    label_emb = conditioning_model(velocity_bin, dstart_bin, duration_bin)
+
+    noise = torch.randn(velocity.size()).to(cfg.train.device)
 
     # if intermediate_outputs=True returns dict of intermediate signals else only denoised signal
-    fake_signals = gen.sample(noise, intermediate_outputs=True)
+    fake_velocity = gen.sample(
+        noise, label_emb=label_emb, intermediate_outputs=True, classifier_free_guidance_scale=classifier_free_guidance_scale
+    )
 
     # idx for plotted intermediate image
-    idx_to_plot = [255, 127, 63, 30, 10, 0]
-    plotted_signals = [fake_signals[i].cpu() for i in idx_to_plot]
+    idx_to_plot = [255, 127, 63, 10, 0]
+    plotted_velocities = [fake_velocity[i].cpu() for i in idx_to_plot]
+    plotted_velocities += [velocity]
 
     # plot fake
-    fig, axes = plt.subplots(batch_size, len(plotted_signals), figsize=(20, 10))
+    fig, axes = plt.subplots(batch_size, len(plotted_velocities), figsize=(20, 10))
+    titles = [f"Timestep: {t}" for t in idx_to_plot] + ["Original"]
 
-    # iterate over signals
+    # iterate over batches
     for i, ax_rows in enumerate(axes):
         # iterate over timesteps
         for j, ax in enumerate(ax_rows):
-            s = plotted_signals[j][i]
+            v = plotted_velocities[j][i][0]
 
-            sns.lineplot(s[0], ax=ax)
-            sns.lineplot(s[1], alpha=0.6, ax=ax)
-
-            ax.set_title(f"Signal {i} at timestep {idx_to_plot[j]}")
+            sns.lineplot(v, ax=ax)
+            ax.set_title(titles[j])
+            ax.set_ylim(-1, 1)
 
     plt.tight_layout()
     plt.show()
 
 
 if __name__ == "__main__":
-    checkpoint = torch.load(
-        "checkpoints/overfit-single-batch-2023-09-04-13-32.ckpt"
-    )
+    checkpoint = torch.load("checkpoints/overfit-single-batch-2023-09-04-17-12.ckpt")
 
     cfg = checkpoint["config"]
 
@@ -77,11 +93,31 @@ if __name__ == "__main__":
         schedule_type=cfg.models.forward_diffusion.schedule_type,
     ).to(cfg.train.device)
 
+    cond_model_ckpt = torch.load(hf_hub_download(repo_id=cfg.paths.cond_model_repo_id, filename=cfg.paths.cond_model_ckpt_path))
+    cfg_cond_model = cond_model_ckpt["config"]
+
+    conditioning_model = (
+        VelocityTimeEncoder(
+            num_embeddings=cfg_cond_model.models.velocity_time_encoder.num_embeddings,
+            embedding_dim=cfg_cond_model.models.velocity_time_encoder.embedding_dim,
+            output_embedding_dim=cfg_cond_model.models.velocity_time_encoder.output_embedding_dim,
+            num_attn_blocks=cfg_cond_model.models.velocity_time_encoder.num_attn_blocks,
+            num_attn_heads=cfg_cond_model.models.velocity_time_encoder.num_attn_heads,
+            attn_ffn_expansion=cfg_cond_model.models.velocity_time_encoder.attn_ffn_expansion,
+            dropout_rate=cfg_cond_model.models.velocity_time_encoder.dropout_rate,
+        )
+        .eval()
+        .to(cfg.train.device)
+    )
+
     model.load_state_dict(checkpoint["model"])
     ema_model.load_state_dict(checkpoint["ema_model"])
     forward_diffusion.load_state_dict(checkpoint["forward_diffusion"])
+    conditioning_model.load_state_dict(cond_model_ckpt["velocity_time_encoder"])
 
     gen = Generator(model, forward_diffusion)
+    gen_ema = Generator(ema_model, forward_diffusion)
 
-    # test generation of fake data
-    test_generation(gen, cfg, batch_size=4)
+    eval_generation(gen, conditioning_model, cfg)
+
+    # eval_generation(gen_ema, conditioning_model, cfg)
