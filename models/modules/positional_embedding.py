@@ -11,11 +11,7 @@ class SinusoidalPositionEmbeddings(nn.Module):
         inv_freq = 1.0 / (10000 ** (torch.arange(0, embedding_size, 2).float() / embedding_size))
         self.register_buffer("inv_freq", inv_freq)
 
-        self.cache = None
-
     def forward(self, t: torch.Tensor):
-        if self.cache is not None:
-            return self.cache
 
         pos_emb = torch.einsum("i,j->ij", t, self.inv_freq)
         pe = torch.zeros(t.shape[0], self.embedding_size, device=t.device)

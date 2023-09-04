@@ -189,8 +189,9 @@ def train(cfg: OmegaConf):
         forward_diffusion.load_state_dict(checkpoint["forward_diffusion"])
         optimizer.load_state_dict(checkpoint["optimizer"])
 
-    # ckpt specifies directory and name of the file is name of the experiment in wandb
-    save_path = f"{cfg.paths.save_ckpt_dir}/{cfg.logger.run_name}.ckpt"
+    # checkpoint save path
+    num_params_millions = sum(p.numel() for p in unet.parameters()) / 1_000_000
+    save_path = f"{cfg.paths.save_ckpt_dir}/{cfg.logger.run_name}-params-{num_params_millions}M.ckpt"
 
     # step counts for logging to wandb
     step_count = 0

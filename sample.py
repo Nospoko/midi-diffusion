@@ -36,7 +36,7 @@ class Generator:
             predicted_noise = self.model(x, t, label_emb)
 
             # classifier free guidance
-            if classifier_free_guidance_scale > 0:
+            if label_emb is not None:
                 uncond_predicted_noise = self.model(x, t, None)
                 predicted_noise = torch.lerp(uncond_predicted_noise, predicted_noise, classifier_free_guidance_scale)
 
