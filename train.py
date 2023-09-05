@@ -30,11 +30,12 @@ def preprocess_dataset(dataset_name: str, batch_size: int, num_workers: int, *, 
     train_ds = load_dataset(dataset_name, split="train")
     train_ds = MidiDataset(train_ds)
 
+    # if augmention threshold 1 means data is not augmented
     val_ds = load_dataset(dataset_name, split="validation")
-    val_ds = MidiDataset(val_ds)
+    val_ds = MidiDataset(val_ds, augmentation_threshold=1)
 
     test_ds = load_dataset(dataset_name, split="test")
-    test_ds = MidiDataset(test_ds)
+    test_ds = MidiDataset(test_ds, augmentation_threshold=1)
 
     if overfit_single_batch:
         train_ds = Subset(train_ds, indices=range(batch_size))
@@ -136,6 +137,8 @@ def upload_to_huggingface(ckpt_save_path: str, cfg: OmegaConf):
 
 @hydra.main(config_path="configs", config_name="config-default", version_base="1.3.2")
 def train(cfg: OmegaConf):
+    wandb.login()
+
     # create dir if they don't exist
     makedir_if_not_exists(cfg.paths.log_dir)
     makedir_if_not_exists(cfg.paths.save_ckpt_dir)
@@ -168,7 +171,7 @@ def train(cfg: OmegaConf):
         )
         cfg_cond_model = cond_model_ckpt["config"]
 
-        conditioning_model = (
+        velocity_time_conditioning_model = (
             VelocityTimeEncoder(
                 num_embeddings=cfg_cond_model.models.velocity_time_encoder.num_embeddings,
                 embedding_dim=cfg_cond_model.models.velocity_time_encoder.embedding_dim,
@@ -182,10 +185,28 @@ def train(cfg: OmegaConf):
             .to(device)
         )
 
-        conditioning_model.load_state_dict(cond_model_ckpt["velocity_time_encoder"])
+        # pitch_conditioning_model = (
+        #     PitchEncoder(
+        #         num_embeddings=cfg_cond_model.models.pitch_encoder.num_embeddings,
+        #         embedding_dim=cfg_cond_model.models.pitch_encoder.embedding_dim,
+        #         output_embedding_dim=cfg_cond_model.models.pitch_encoder.output_embedding_dim,
+        #         num_attn_blocks=cfg_cond_model.models.pitch_encoder.num_attn_blocks,
+        #         num_attn_heads=cfg_cond_model.models.pitch_encoder.num_attn_heads,
+        #         attn_ffn_expansion=cfg_cond_model.models.pitch_encoder.attn_ffn_expansion,
+        #         dropout_rate=cfg_cond_model.models.pitch_encoder.dropout_rate,
+        #     )
+        #     .eval()
+        #     .to(device)
+        # )
+
+        velocity_time_conditioning_model.load_state_dict(cond_model_ckpt["velocity_time_encoder"])
+        # pitch_conditioning_model.load_state_dict(cond_model_ckpt["pitch_encoder"])
 
         # freeze layers
-        conditioning_model.requires_grad_(False)
+        velocity_time_conditioning_model.requires_grad_(False)
+        # pitch_conditioning_model.requires_grad_(False)
+
+        # conditioning_models = [velocity_time_conditioning_model, pitch_conditioning_model]
 
     # model
     unet = Unet(
@@ -236,7 +257,7 @@ def train(cfg: OmegaConf):
 
         for batch_idx, batch in train_loop:
             # metrics returns loss and additional metrics if specified in step function
-            loss = forward_step(unet, forward_diffusion, conditioning_model, batch, device)
+            loss = forward_step(unet, forward_diffusion, velocity_time_conditioning_model, batch, device)
 
             optimizer.zero_grad()
             loss.backward()
@@ -262,17 +283,41 @@ def train(cfg: OmegaConf):
         unet.eval()
 
         # val epoch
-        val_metrics = validation_epoch(unet, forward_diffusion, conditioning_model, val_dataloader, device)
+        val_metrics = validation_epoch(
+            unet,
+            forward_diffusion,
+            velocity_time_conditioning_model,
+            val_dataloader,
+            device,
+        )
         val_metrics = {"val/" + key: value for key, value in val_metrics.items()}
 
-        val_metrics_ema = validation_epoch(ema.ema_model, forward_diffusion, conditioning_model, val_dataloader, device)
+        val_metrics_ema = validation_epoch(
+            ema.ema_model,
+            forward_diffusion,
+            velocity_time_conditioning_model,
+            val_dataloader,
+            device,
+        )
         val_metrics_ema = {"val/" + key + "_ema": value for key, value in val_metrics_ema.items()}
 
         # maestro test epoch
-        test_metrics = validation_epoch(unet, forward_diffusion, conditioning_model, maestro_test, device)
+        test_metrics = validation_epoch(
+            unet,
+            forward_diffusion,
+            velocity_time_conditioning_model,
+            maestro_test,
+            device,
+        )
         test_metrics = {"maestro/" + key: value for key, value in test_metrics.items()}
 
-        test_metrics_ema = validation_epoch(ema.ema_model, forward_diffusion, conditioning_model, maestro_test, device)
+        test_metrics_ema = validation_epoch(
+            ema.ema_model,
+            forward_diffusion,
+            velocity_time_conditioning_model,
+            maestro_test,
+            device,
+        )
         test_metrics_ema = {"maestro/" + key + "_ema": value for key, value in test_metrics_ema.items()}
 
         metrics = training_metrics | val_metrics | val_metrics_ema | test_metrics | test_metrics_ema
@@ -289,6 +334,4 @@ def train(cfg: OmegaConf):
 
 
 if __name__ == "__main__":
-    wandb.login()
-
     train()

@@ -75,6 +75,8 @@ def compare_original_and_generated(
     fake_velocity = denormalize_velocity(fake_velocity[0][0].cpu().numpy())
     fake_velocity_ema = denormalize_velocity(fake_velocity_ema[0][0].cpu().numpy())
 
+    print(f"velocity: {fake_velocity.min()} {fake_velocity.max()}")
+
     render_midi_to_mp3(f"{filename}-original.mp3", pitch, dstart, duration, velocity)
     render_midi_to_mp3(f"{filename}-standard.mp3", pitch, dstart, duration, fake_velocity)
     render_midi_to_mp3(f"{filename}-ema.mp3", pitch, dstart, duration, fake_velocity_ema)
@@ -117,7 +119,10 @@ def render_midi_to_mp3(filename: str, pitch: np.ndarray, dstart: np.ndarray, dur
 
 
 if __name__ == "__main__":
-    checkpoint = torch.load("checkpoints/midi-diffusion-2023-09-04-22-33-params-8.601025M.ckpt")
+    checkpoint = torch.load(
+        "checkpoints/midi-diffusion-2023-09-05-13-18-params-15.27M.ckpt"
+        # "checkpoints/midi-diffusion-2023-09-04-22-33-params-8.601025M.ckpt"
+    )
 
     cfg = checkpoint["config"]
 
