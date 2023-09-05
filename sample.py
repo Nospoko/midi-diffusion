@@ -20,8 +20,7 @@ class Generator:
         intermediate_outputs: bool = False,
         classifier_free_guidance_scale: int = 3,
     ) -> torch.Tensor | dict[torch.Tensor]:
-        if intermediate_outputs:
-            outputs = {}
+        outputs = {}
 
         # specify diffusion timesteps
         if timesteps is None:
