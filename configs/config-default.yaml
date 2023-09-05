@@ -24,7 +24,7 @@ paths:
 models:
   unet:
     in_out_channels: 1 # input and output channels
-    dim: 32 # initial number of unet channels (will be multiplied by dim_mults)
+    dim: 64 # initial number of unet channels (will be multiplied by dim_mults)
     dim_mults: [1, 2, 4]
     kernel_size: 7
     num_resnet_groups: 4

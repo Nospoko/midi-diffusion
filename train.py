@@ -86,6 +86,30 @@ def forward_step(
     return loss
 
 
+@torch.no_grad()
+def validation_epoch(
+    model: Unet,
+    forward_diffusion: ForwardDiffusion,
+    conditioning_model: nn.Module,
+    dataloader: DataLoader,
+    device: torch.device,
+) -> dict:
+    # val epoch
+    val_loop = tqdm(enumerate(dataloader), total=len(dataloader), leave=False)
+    loss_epoch = 0.0
+
+    for batch_idx, batch in val_loop:
+        # metrics returns loss and additional metrics if specified in step function
+        loss = forward_step(model, forward_diffusion, conditioning_model, batch, device)
+
+        val_loop.set_postfix(loss=loss.item())
+
+        loss_epoch += loss.item()
+
+    metrics = {"loss_epoch": loss_epoch / len(dataloader)}
+    return metrics
+
+
 def save_checkpoint(
     model: Unet, ema_model: Unet, forward_diffusion: ForwardDiffusion, optimizer: optim.Optimizer, cfg: OmegaConf, save_path: str
 ):
@@ -119,6 +143,14 @@ def train(cfg: OmegaConf):
     # dataset
     train_dataloader, val_dataloader, _ = preprocess_dataset(
         dataset_name=cfg.train.dataset_name,
+        batch_size=cfg.train.batch_size,
+        num_workers=cfg.train.num_workers,
+        overfit_single_batch=cfg.train.overfit_single_batch,
+    )
+
+    # validate on quantized maestro
+    _, maestro_test, _ = preprocess_dataset(
+        dataset_name="JasiekKaczmarczyk/maestro-sustain-quantized",
         batch_size=cfg.train.batch_size,
         num_workers=cfg.train.num_workers,
         overfit_single_batch=cfg.train.overfit_single_batch,
@@ -190,8 +222,8 @@ def train(cfg: OmegaConf):
         optimizer.load_state_dict(checkpoint["optimizer"])
 
     # checkpoint save path
-    num_params_millions = sum(p.numel() for p in unet.parameters()) / 1_000_000
-    save_path = f"{cfg.paths.save_ckpt_dir}/{cfg.logger.run_name}-params-{num_params_millions}M.ckpt"
+    num_params_millions = sum([p.numel() for p in unet.parameters()]) / 1_000_000
+    save_path = f"{cfg.paths.save_ckpt_dir}/{cfg.logger.run_name}-params-{num_params_millions:.2f}M.ckpt"
 
     # step counts for logging to wandb
     step_count = 0
@@ -227,23 +259,23 @@ def train(cfg: OmegaConf):
 
         training_metrics = {"train/loss_epoch": loss_epoch / len(train_dataloader)}
 
-        # val epoch
         unet.eval()
-        val_loop = tqdm(enumerate(val_dataloader), total=len(val_dataloader), leave=False)
-        loss_epoch = 0.0
 
-        with torch.no_grad():
-            for batch_idx, batch in val_loop:
-                # metrics returns loss and additional metrics if specified in step function
-                loss = forward_step(unet, forward_diffusion, conditioning_model, batch, device)
+        # val epoch
+        val_metrics = validation_epoch(unet, forward_diffusion, conditioning_model, val_dataloader, device)
+        val_metrics = {"val/" + key: value for key, value in val_metrics.items()}
 
-                val_loop.set_postfix(loss=loss.item())
+        val_metrics_ema = validation_epoch(ema.ema_model, forward_diffusion, conditioning_model, val_dataloader, device)
+        val_metrics_ema = {"val/" + key + "_ema": value for key, value in val_metrics_ema.items()}
 
-                loss_epoch += loss.item()
+        # maestro test epoch
+        test_metrics = validation_epoch(unet, forward_diffusion, conditioning_model, maestro_test, device)
+        test_metrics = {"maestro/" + key: value for key, value in test_metrics.items()}
 
-        val_metrics = {"val/loss_epoch": loss_epoch / len(val_dataloader)}
+        test_metrics_ema = validation_epoch(ema.ema_model, forward_diffusion, conditioning_model, maestro_test, device)
+        test_metrics_ema = {"maestro/" + key + "_ema": value for key, value in test_metrics_ema.items()}
 
-        metrics = training_metrics | val_metrics
+        metrics = training_metrics | val_metrics | val_metrics_ema | test_metrics | test_metrics_ema
         wandb.log(metrics, step=step_count)
 
     # save model at the end of training

@@ -17,9 +17,9 @@ def eval_generation(
     cfg: OmegaConf,
     conditioning_model: nn.Module = None,
     classifier_free_guidance_scale: float = 3.0,
+    batch_size: int = 2,
 ):
-    batch_size = 2
-    loader, _, _ = preprocess_dataset("JasiekKaczmarczyk/giant-midi-sustain-quantized", batch_size, 1, overfit_single_batch=True)
+    _, loader, _ = preprocess_dataset("JasiekKaczmarczyk/giant-midi-sustain-quantized", batch_size, 1, overfit_single_batch=False)
 
     batch = next(iter(loader))
 
@@ -66,7 +66,7 @@ def eval_generation(
 
 
 if __name__ == "__main__":
-    checkpoint = torch.load("checkpoints/overfit-single-batch-2023-09-04-17-12.ckpt")
+    checkpoint = torch.load("checkpoints/midi-diffusion-2023-09-04-22-33-params-8.601025M.ckpt")
 
     cfg = checkpoint["config"]
 
@@ -122,8 +122,8 @@ if __name__ == "__main__":
     gen = Generator(model, forward_diffusion)
     gen_ema = Generator(ema_model, forward_diffusion)
 
-    eval_generation(gen, cfg, conditioning_model, classifier_free_guidance_scale=3.0)
+    eval_generation(gen, cfg, conditioning_model)
 
-    eval_generation(gen, cfg, classifier_free_guidance_scale=0)
+    # eval_generation(gen, cfg, classifier_free_guidance_scale=0)
 
-    # eval_generation(gen_ema, conditioning_model, cfg)
+    eval_generation(gen_ema, cfg, conditioning_model)

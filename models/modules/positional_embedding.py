@@ -12,7 +12,6 @@ class SinusoidalPositionEmbeddings(nn.Module):
         self.register_buffer("inv_freq", inv_freq)
 
     def forward(self, t: torch.Tensor):
-
         pos_emb = torch.einsum("i,j->ij", t, self.inv_freq)
         pe = torch.zeros(t.shape[0], self.embedding_size, device=t.device)
         pe[:, 0::2] = torch.sin(pos_emb)
