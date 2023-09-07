@@ -4,6 +4,8 @@ import torch
 import numpy as np
 import pretty_midi
 import torch.nn as nn
+import fortepyan as ff
+import pandas as pd
 from omegaconf import OmegaConf
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -12,6 +14,7 @@ from huggingface_hub.file_download import hf_hub_download
 
 from sample import Generator
 from data.dataset import MidiDataset
+from data.quantizer import MidiQuantizer
 from models.reverse_diffusion import Unet
 from models.forward_diffusion import ForwardDiffusion
 from models.velocity_time_encoder import VelocityTimeEncoder
@@ -24,10 +27,52 @@ def preprocess_dataset(dataset_name: str, batch_size: int, num_workers: int):
 
     return dataloader
 
+def get_maestro_record(idx: int):
+    ds = load_dataset("roszcz/maestro-v1-sustain", split="validation")
+    quantizer = MidiQuantizer(7, 7, 7)
+
+    record = ds[idx]
+    midi_filename = f"{record['composer']} {record['title']}"
+    piece = ff.MidiPiece.from_huggingface(record)
+
+    piece.df["next_start"] = piece.df.start.shift(-1)
+    piece.df["dstart"] = piece.df.next_start - piece.df.start
+
+    piece_quantized = quantizer.quantize_piece(piece)
+
+    sequence = {
+        "filename": midi_filename,
+        "pitch": torch.tensor(piece.df.pitch, dtype=torch.long)[None, None, :1024],
+        "dstart": torch.tensor(piece.df.dstart, dtype=torch.float)[None, None, :1024],
+        "duration": torch.tensor(piece.df.duration, dtype=torch.float)[None, None, :1024],
+        "velocity": (torch.tensor(piece.df.velocity, dtype=torch.float)[None, None, :1024] / 64) - 1,
+        "dstart_bin": torch.tensor(piece_quantized.df.dstart_bin, dtype=torch.long)[None, :1024],
+        "duration_bin": torch.tensor(piece_quantized.df.duration_bin, dtype=torch.long)[None, :1024],
+        "velocity_bin": torch.tensor(piece_quantized.df.velocity_bin, dtype=torch.long)[None, :1024],
+    }
+
+    return sequence
+
+
 
 def denormalize_velocity(velocity: np.ndarray):
     return (velocity + 1) * 64
 
+
+def to_midi_piece(pitch: np.ndarray, dstart: np.ndarray, duration: np.ndarray, velocity: np.ndarray) -> ff.MidiPiece:
+    record = {
+        "pitch": pitch,
+        "velocity": velocity,
+        "dstart": dstart,
+        "duration": duration,
+    }
+
+    df = pd.DataFrame(record)
+    df["start"] = df.dstart.cumsum().shift(1).fillna(0)
+    df["end"] = df.start + df.duration
+
+    return ff.MidiPiece(df)
+    
 
 def compare_original_and_generated(
     gen: Generator,
@@ -37,13 +82,12 @@ def compare_original_and_generated(
     classifier_free_guidance_scale: float = 3.0,
     batch_size: int = 1,
 ):
-    loader = preprocess_dataset("JasiekKaczmarczyk/maestro-sustain-quantized", batch_size, 1)
+    # loader = preprocess_dataset("JasiekKaczmarczyk/maestro-sustain-quantized", batch_size, 1)
 
-    batch = next(iter(loader))
+    batch = get_maestro_record(idx=104)
 
     # grab only name without extension
-    filename = " ".join(batch["filename"])
-    filename = filename.split(".")[0]
+    filename = batch["filename"]
 
     # unpack other attributes
     pitch = batch["pitch"][0][0].numpy()
@@ -75,47 +119,54 @@ def compare_original_and_generated(
     fake_velocity = denormalize_velocity(fake_velocity[0][0].cpu().numpy())
     fake_velocity_ema = denormalize_velocity(fake_velocity_ema[0][0].cpu().numpy())
 
-    print(f"velocity: {fake_velocity.min()} {fake_velocity.max()}")
+    original_piece = to_midi_piece(pitch, dstart, duration, velocity)
+    model_piece = to_midi_piece(pitch, dstart, duration, fake_velocity)
+    model_ema_piece = to_midi_piece(pitch, dstart, duration, fake_velocity_ema)
 
-    render_midi_to_mp3(f"{filename}-original.mp3", pitch, dstart, duration, velocity)
-    render_midi_to_mp3(f"{filename}-standard.mp3", pitch, dstart, duration, fake_velocity)
-    render_midi_to_mp3(f"{filename}-ema.mp3", pitch, dstart, duration, fake_velocity_ema)
+    original_midi = original_piece.to_midi()
+    model_midi = model_piece.to_midi()
+    model_ema_midi = model_ema_piece.to_midi()
 
+    # save as mp3
+    render_midi_to_mp3(original_midi, f"tmp/mp3/{filename}-original.mp3")
+    render_midi_to_mp3(model_midi, f"tmp/mp3/{filename}-model.mp3")
+    render_midi_to_mp3(model_ema_midi, f"tmp/mp3/{filename}-model-ema.mp3")
 
-def to_midi(pitch: np.ndarray, dstart: np.ndarray, duration: np.ndarray, velocity: np.ndarray, track_name: str = "piano"):
-    track = pretty_midi.PrettyMIDI()
-    piano = pretty_midi.Instrument(program=0, name=track_name)
-
-    previous_start = 0.0
-
-    for p, ds, d, v in zip(pitch, dstart, duration, velocity):
-        start = previous_start + ds
-        end = start + d
-        previous_start = start
-
-        note = pretty_midi.Note(
-            velocity=int(v),
-            pitch=int(p),
-            start=start,
-            end=end,
-        )
-
-        piano.notes.append(note)
-
-    track.instruments.append(piano)
-
-    return track
+    # save as midi
+    original_midi.write(f"tmp/midi/{filename}-original.midi")
+    model_midi.write(f"tmp/midi/{filename}-model.midi")
+    model_ema_midi.write(f"tmp/midi/{filename}-model-ema.midi")
 
 
-def render_midi_to_mp3(filename: str, pitch: np.ndarray, dstart: np.ndarray, duration: np.ndarray, velocity: np.ndarray) -> str:
-    midi_filename = os.path.basename(filename)
-    mp3_path = os.path.join("tmp", midi_filename)
+# def to_midi(pitch: np.ndarray, dstart: np.ndarray, duration: np.ndarray, velocity: np.ndarray, track_name: str = "piano"):
+#     track = pretty_midi.PrettyMIDI()
+#     piano = pretty_midi.Instrument(program=0, name=track_name)
 
-    if not os.path.exists(mp3_path):
-        track = to_midi(pitch, dstart, duration, velocity)
-        render_audio.midi_to_mp3(track, mp3_path)
+#     previous_start = 0.0
 
-    return mp3_path
+#     for p, ds, d, v in zip(pitch, dstart, duration, velocity):
+#         start = previous_start + ds
+#         end = start + d
+#         previous_start = start
+
+#         note = pretty_midi.Note(
+#             velocity=int(v),
+#             pitch=int(p),
+#             start=start,
+#             end=end,
+#         )
+
+#         piano.notes.append(note)
+
+#     track.instruments.append(piano)
+
+#     return track
+
+
+def render_midi_to_mp3(midi_file: pretty_midi.PrettyMIDI, filepath: str) -> str:
+    render_audio.midi_to_mp3(midi_file, filepath)
+
+    return filepath
 
 
 if __name__ == "__main__":
