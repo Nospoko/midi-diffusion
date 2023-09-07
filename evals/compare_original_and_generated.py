@@ -1,11 +1,10 @@
-import os
-
 import torch
 import numpy as np
 import pretty_midi
+import pandas as pd
 import torch.nn as nn
 import fortepyan as ff
-import pandas as pd
+import os
 from omegaconf import OmegaConf
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -19,6 +18,9 @@ from models.reverse_diffusion import Unet
 from models.forward_diffusion import ForwardDiffusion
 from models.velocity_time_encoder import VelocityTimeEncoder
 
+def makedir_if_not_exists(dir: str):
+    if not os.path.exists(dir):
+        os.makedirs(dir)
 
 def preprocess_dataset(dataset_name: str, batch_size: int, num_workers: int):
     ds = load_dataset(dataset_name, split="validation")
@@ -27,11 +29,19 @@ def preprocess_dataset(dataset_name: str, batch_size: int, num_workers: int):
 
     return dataloader
 
-def get_maestro_record(idx: int):
+
+def get_maestro_record(query: str | int):
     ds = load_dataset("roszcz/maestro-v1-sustain", split="validation")
     quantizer = MidiQuantizer(7, 7, 7)
 
-    record = ds[idx]
+    if isinstance(query, int):
+        record = ds[query]
+    else:
+        idx_query = [i for i, record in enumerate(ds) if str.lower(query) in str.lower(f"{record['composer']} {record['title']}")]
+        # get first record
+        idx = idx_query[0]
+        record = ds[idx]
+
     midi_filename = f"{record['composer']} {record['title']}"
     piece = ff.MidiPiece.from_huggingface(record)
 
@@ -42,9 +52,9 @@ def get_maestro_record(idx: int):
 
     sequence = {
         "filename": midi_filename,
-        "pitch": torch.tensor(piece.df.pitch, dtype=torch.long)[None, None, :1024],
-        "dstart": torch.tensor(piece.df.dstart, dtype=torch.float)[None, None, :1024],
-        "duration": torch.tensor(piece.df.duration, dtype=torch.float)[None, None, :1024],
+        "pitch": torch.tensor(piece.df.pitch, dtype=torch.long)[:1024],
+        "dstart": torch.tensor(piece.df.dstart, dtype=torch.float)[:1024],
+        "duration": torch.tensor(piece.df.duration, dtype=torch.float)[:1024],
         "velocity": (torch.tensor(piece.df.velocity, dtype=torch.float)[None, None, :1024] / 64) - 1,
         "dstart_bin": torch.tensor(piece_quantized.df.dstart_bin, dtype=torch.long)[None, :1024],
         "duration_bin": torch.tensor(piece_quantized.df.duration_bin, dtype=torch.long)[None, :1024],
@@ -52,7 +62,6 @@ def get_maestro_record(idx: int):
     }
 
     return sequence
-
 
 
 def denormalize_velocity(velocity: np.ndarray):
@@ -72,27 +81,28 @@ def to_midi_piece(pitch: np.ndarray, dstart: np.ndarray, duration: np.ndarray, v
     df["end"] = df.start + df.duration
 
     return ff.MidiPiece(df)
-    
+
 
 def compare_original_and_generated(
     gen: Generator,
     gen_ema: Generator,
+    query: str | int,
     cfg: OmegaConf,
     conditioning_model: nn.Module = None,
     classifier_free_guidance_scale: float = 3.0,
-    batch_size: int = 1,
+    # batch_size: int = 1,
 ):
     # loader = preprocess_dataset("JasiekKaczmarczyk/maestro-sustain-quantized", batch_size, 1)
 
-    batch = get_maestro_record(idx=104)
+    batch = get_maestro_record(query)
 
     # grab only name without extension
     filename = batch["filename"]
 
     # unpack other attributes
-    pitch = batch["pitch"][0][0].numpy()
-    dstart = batch["dstart"][0][0].numpy()
-    duration = batch["duration"][0][0].numpy()
+    pitch = batch["pitch"].numpy()
+    dstart = batch["dstart"].numpy()
+    duration = batch["duration"].numpy()
     velocity = batch["velocity"]
 
     velocity_bin = batch["velocity_bin"].to(cfg.train.device)
@@ -170,10 +180,10 @@ def render_midi_to_mp3(midi_file: pretty_midi.PrettyMIDI, filepath: str) -> str:
 
 
 if __name__ == "__main__":
-    checkpoint = torch.load(
-        "checkpoints/midi-diffusion-2023-09-05-13-18-params-15.27M.ckpt"
-        # "checkpoints/midi-diffusion-2023-09-04-22-33-params-8.601025M.ckpt"
-    )
+    makedir_if_not_exists("tmp/mp3")
+    makedir_if_not_exists("tmp/midi")
+
+    checkpoint = torch.load("checkpoints/midi-diffusion-2023-09-07-11-10-params-15.27M.ckpt")
 
     cfg = checkpoint["config"]
 
@@ -229,4 +239,6 @@ if __name__ == "__main__":
     gen = Generator(model, forward_diffusion)
     gen_ema = Generator(ema_model, forward_diffusion)
 
-    compare_original_and_generated(gen, gen_ema, cfg, conditioning_model, batch_size=1)
+    query = "Chopin"
+
+    compare_original_and_generated(gen, gen_ema, query, cfg, conditioning_model)

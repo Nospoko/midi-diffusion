@@ -9,10 +9,10 @@ from tqdm import tqdm
 import torch.optim as optim
 import torch.nn.functional as F
 from omegaconf import OmegaConf
-from omegaconf.listconfig import ListConfig
-from datasets import load_dataset, concatenate_datasets
 from huggingface_hub import upload_file
+from omegaconf.listconfig import ListConfig
 from torch.utils.data import Subset, DataLoader
+from datasets import load_dataset, concatenate_datasets
 from huggingface_hub.file_download import hf_hub_download
 
 from data.dataset import MidiDataset
@@ -37,34 +37,24 @@ def preprocess_dataset(dataset_name: str | list[str], batch_size: int, num_worke
 
         for ds_name in dataset_name:
             tr_ds = load_dataset(ds_name, split="train", use_auth_token=hf_token)
-
-            # if augmention threshold 1 means data is not augmented
             v_ds = load_dataset(ds_name, split="validation", use_auth_token=hf_token)
-
             t_ds = load_dataset(ds_name, split="test", use_auth_token=hf_token)
 
             train_ds.append(tr_ds)
             val_ds.append(v_ds)
             test_ds.append(t_ds)
 
-
         train_ds = concatenate_datasets(train_ds)
         val_ds = concatenate_datasets(val_ds)
         test_ds = concatenate_datasets(test_ds)
-
-        train_ds = MidiDataset(train_ds)
-        val_ds = MidiDataset(val_ds, augmentation_threshold=1)
-        test_ds = MidiDataset(test_ds, augmentation_threshold=1)
     else:
-        train_ds = load_dataset(dataset_name, split="train")
-        train_ds = MidiDataset(train_ds)
+        train_ds = load_dataset(dataset_name, split="train", use_auth_token=hf_token)
+        val_ds = load_dataset(dataset_name, split="validation", use_auth_token=hf_token)
+        test_ds = load_dataset(dataset_name, split="test", use_auth_token=hf_token)
 
-        # if augmention threshold 1 means data is not augmented
-        val_ds = load_dataset(dataset_name, split="validation")
-        val_ds = MidiDataset(val_ds, augmentation_threshold=1)
-
-        test_ds = load_dataset(dataset_name, split="test")
-        test_ds = MidiDataset(test_ds, augmentation_threshold=1)
+    train_ds = MidiDataset(train_ds, augmentation_percentage=0.8)
+    val_ds = MidiDataset(val_ds, augmentation_percentage=0.0)
+    test_ds = MidiDataset(test_ds, augmentation_percentage=0.0)
 
     if overfit_single_batch:
         train_ds = Subset(train_ds, indices=range(batch_size))

@@ -36,11 +36,11 @@ def pitch_shift(pitch: np.ndarray, shift_threshold: int = 5) -> np.ndarray:
 
 
 class MidiDataset(Dataset):
-    def __init__(self, dataset: HFDataset, augmentation_threshold: float = 0.2):
+    def __init__(self, dataset: HFDataset, augmentation_percentage: float = 0.0):
         super().__init__()
 
         self.dataset = dataset
-        self.augmentation_threshold = augmentation_threshold
+        self.augmentation_percentage = augmentation_percentage
         self.quantizer = MidiQuantizer(7, 7, 7)
 
     def __len__(self):
@@ -59,13 +59,13 @@ class MidiDataset(Dataset):
         velocity_bin = np.array(sequence["velocity_bin"])
 
         # shift pitch augmentation
-        if random.random() > self.augmentation_threshold:
+        if random.random() < self.augmentation_percentage:
             # max shift is octave down or up
             shift = random.randint(1, 12)
             pitch = pitch_shift(pitch, shift)
 
         # change tempo augmentation
-        if random.random() > self.augmentation_threshold:
+        if random.random() < self.augmentation_percentage:
             dstart, duration = change_speed(dstart, duration)
             # change bins for new dstart and duration values
             dstart_bin = np.digitize(dstart, self.quantizer.dstart_bin_edges) - 1
