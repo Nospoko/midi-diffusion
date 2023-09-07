@@ -90,7 +90,6 @@ def compare_original_and_generated(
     cfg: OmegaConf,
     conditioning_model: nn.Module = None,
     classifier_free_guidance_scale: float = 3.0,
-    # batch_size: int = 1,
 ):
     # loader = preprocess_dataset("JasiekKaczmarczyk/maestro-sustain-quantized", batch_size, 1)
 
@@ -148,31 +147,6 @@ def compare_original_and_generated(
     model_ema_midi.write(f"tmp/midi/{filename}-model-ema.midi")
 
 
-# def to_midi(pitch: np.ndarray, dstart: np.ndarray, duration: np.ndarray, velocity: np.ndarray, track_name: str = "piano"):
-#     track = pretty_midi.PrettyMIDI()
-#     piano = pretty_midi.Instrument(program=0, name=track_name)
-
-#     previous_start = 0.0
-
-#     for p, ds, d, v in zip(pitch, dstart, duration, velocity):
-#         start = previous_start + ds
-#         end = start + d
-#         previous_start = start
-
-#         note = pretty_midi.Note(
-#             velocity=int(v),
-#             pitch=int(p),
-#             start=start,
-#             end=end,
-#         )
-
-#         piano.notes.append(note)
-
-#     track.instruments.append(piano)
-
-#     return track
-
-
 def render_midi_to_mp3(midi_file: pretty_midi.PrettyMIDI, filepath: str) -> str:
     render_audio.midi_to_mp3(midi_file, filepath)
 
@@ -183,7 +157,9 @@ if __name__ == "__main__":
     makedir_if_not_exists("tmp/mp3")
     makedir_if_not_exists("tmp/midi")
 
-    checkpoint = torch.load("checkpoints/midi-diffusion-2023-09-07-11-10-params-15.27M.ckpt")
+    checkpoint = torch.load(
+        hf_hub_download("JasiekKaczmarczyk/midi-diffusion", filename="midi-diffusion-2023-09-07-11-10-params-15.27M.ckpt")
+    )
 
     cfg = checkpoint["config"]
 
