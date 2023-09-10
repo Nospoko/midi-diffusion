@@ -2,6 +2,21 @@
 
 Diffusion model for generating MIDI sequences.
 
+### Training
+
+```sh
+python train.py --config-name config-default
+```
+
+```mermaid
+flowchart TD
+    A[MIDI Sequence] --> B(quantized piece)
+    A --> C(velocity)
+    C --> D(velocity diffusion)
+    B --> E(conditioning embedding)
+    E --> F(noise prediction)
+    D --> F 
+```
 
 ### Code Style
 
