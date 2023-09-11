@@ -15,7 +15,7 @@ class Generator:
     def sample(
         self,
         x: torch.Tensor,
-        label_emb: torch.Tensor = None,
+        conditioning_embeding: torch.Tensor = None,
         timesteps: int = None,
         intermediate_outputs: bool = False,
         classifier_free_guidance_scale: int = 3,
@@ -32,10 +32,10 @@ class Generator:
             t = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * i
 
             # predict noise
-            predicted_noise = self.model(x, t, label_emb)
+            predicted_noise = self.model(x, t, conditioning_embeding)
 
             # classifier free guidance
-            if label_emb is not None:
+            if conditioning_embeding is not None:
                 uncond_predicted_noise = self.model(x, t, None)
                 predicted_noise = torch.lerp(uncond_predicted_noise, predicted_noise, classifier_free_guidance_scale)
 

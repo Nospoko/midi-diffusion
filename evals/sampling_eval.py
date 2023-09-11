@@ -44,9 +44,9 @@ def eval_generation(
 
     # if intermediate_outputs=True returns dict of intermediate signals else only denoised signal
     fake_velocity = gen.sample(
-        x=noise, 
-        conditioning_embeding=conditioning_embeding, 
-        intermediate_outputs=True, 
+        x=noise,
+        conditioning_embeding=conditioning_embeding,
+        intermediate_outputs=True,
         classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
 

@@ -131,16 +131,16 @@ def eval_interpolation(
 
     # sample velocities from standard and ema model
     fake_velocity = gen.sample(
-        x=noise, 
-        conditioning_embeding=conditioning_embeding, 
-        intermediate_outputs=False, 
+        x=noise,
+        conditioning_embeding=conditioning_embeding,
+        intermediate_outputs=False,
         classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
     fake_velocity_ema = gen_ema.sample(
-        x=noise, 
-        conditioning_embeding=conditioning_embeding, 
-        intermediate_outputs=False, 
-        classifier_free_guidance_scale=classifier_free_guidance_scale
+        x=noise,
+        conditioning_embeding=conditioning_embeding,
+        intermediate_outputs=False,
+        classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
 
     fake_velocity = torch.clip(fake_velocity, -1, 1)

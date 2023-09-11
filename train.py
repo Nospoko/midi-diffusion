@@ -10,7 +10,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 from omegaconf import OmegaConf
 from huggingface_hub import upload_file
-from omegaconf.listconfig import ListConfig
 from torch.utils.data import Subset, DataLoader
 from datasets import load_dataset, concatenate_datasets
 from huggingface_hub.file_download import hf_hub_download
@@ -179,9 +178,7 @@ def train(cfg: OmegaConf):
     device = torch.device(cfg.train.device)
 
     # get trained conditioning model
-    cond_model_ckpt = torch.load(
-        hf_hub_download(repo_id=cfg.paths.cond_model_repo_id, filename=cfg.paths.cond_model_ckpt_path)
-    )
+    cond_model_ckpt = torch.load(hf_hub_download(repo_id=cfg.paths.cond_model_repo_id, filename=cfg.paths.cond_model_ckpt_path))
     cfg_cond_model = cond_model_ckpt["config"]
 
     velocity_time_conditioning_model = (

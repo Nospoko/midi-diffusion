@@ -121,10 +121,16 @@ def compare_original_and_generated(
 
     # sample velocities from standard and ema model
     fake_velocity = gen.sample(
-        noise, conditioning_embeding=conditioning_embeding, intermediate_outputs=False, classifier_free_guidance_scale=classifier_free_guidance_scale
+        noise,
+        conditioning_embeding=conditioning_embeding,
+        intermediate_outputs=False,
+        classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
     fake_velocity_ema = gen_ema.sample(
-        noise, conditioning_embeding=conditioning_embeding, intermediate_outputs=False, classifier_free_guidance_scale=classifier_free_guidance_scale
+        noise,
+        conditioning_embeding=conditioning_embeding,
+        intermediate_outputs=False,
+        classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
 
     velocity = denormalize_velocity(velocity[0][0].numpy())
