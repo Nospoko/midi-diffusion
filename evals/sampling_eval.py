@@ -19,7 +19,12 @@ def eval_generation(
     classifier_free_guidance_scale: float = 3.0,
     batch_size: int = 2,
 ):
-    _, loader, _ = preprocess_dataset("JasiekKaczmarczyk/giant-midi-sustain-quantized", batch_size, 1, overfit_single_batch=False)
+    _, loader, _ = preprocess_dataset(
+        dataset_name="JasiekKaczmarczyk/giant-midi-sustain-quantized",
+        batch_size=batch_size,
+        num_workers=1,
+        overfit_single_batch=False,
+    )
 
     batch = next(iter(loader))
 
@@ -31,15 +36,18 @@ def eval_generation(
 
     if conditioning_model is not None:
         with torch.no_grad():
-            label_emb = conditioning_model(velocity_bin, dstart_bin, duration_bin)
+            conditioning_embeding = conditioning_model(velocity_bin, dstart_bin, duration_bin)
     else:
-        label_emb = None
+        conditioning_embeding = None
 
     noise = torch.randn(velocity.size()).to(cfg.train.device)
 
     # if intermediate_outputs=True returns dict of intermediate signals else only denoised signal
     fake_velocity = gen.sample(
-        noise, label_emb=label_emb, intermediate_outputs=True, classifier_free_guidance_scale=classifier_free_guidance_scale
+        x=noise, 
+        conditioning_embeding=conditioning_embeding, 
+        intermediate_outputs=True, 
+        classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
 
     # idx for plotted intermediate image
@@ -123,7 +131,5 @@ if __name__ == "__main__":
     gen_ema = Generator(ema_model, forward_diffusion)
 
     eval_generation(gen, cfg, conditioning_model)
-
-    # eval_generation(gen, cfg, classifier_free_guidance_scale=0)
 
     eval_generation(gen_ema, cfg, conditioning_model)

@@ -1,10 +1,11 @@
+import os
+
 import torch
 import numpy as np
 import pretty_midi
 import pandas as pd
 import torch.nn as nn
 import fortepyan as ff
-import os
 from omegaconf import OmegaConf
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -15,13 +16,15 @@ from sample import Generator
 from data.dataset import MidiDataset
 from data.quantizer import MidiQuantizer
 from models.reverse_diffusion import Unet
+from models.pitch_encoder import PitchEncoder
 from models.forward_diffusion import ForwardDiffusion
 from models.velocity_time_encoder import VelocityTimeEncoder
-from models.pitch_encoder import PitchEncoder
+
 
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
         os.makedirs(dir)
+
 
 def preprocess_dataset(dataset_name: str, batch_size: int, num_workers: int):
     ds = load_dataset(dataset_name, split="validation")
@@ -120,18 +123,24 @@ def eval_interpolation(
 
             label_emb_dynamics = velocity_time_conditioning_model(velocity_bin, dstart_bin, duration_bin)
             label_emb_pitch = pitch_conditioning_model(pitch)
-            label_emb = torch.lerp(label_emb_dynamics, label_emb_pitch, interpolation_weight)
+            conditioning_embeding = torch.lerp(label_emb_dynamics, label_emb_pitch, interpolation_weight)
     else:
-        label_emb = None
+        conditioning_embeding = None
 
     noise = torch.randn(velocity.size()).to(cfg.train.device)
 
     # sample velocities from standard and ema model
     fake_velocity = gen.sample(
-        noise, label_emb=label_emb, intermediate_outputs=False, classifier_free_guidance_scale=classifier_free_guidance_scale
+        x=noise, 
+        conditioning_embeding=conditioning_embeding, 
+        intermediate_outputs=False, 
+        classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
     fake_velocity_ema = gen_ema.sample(
-        noise, label_emb=label_emb, intermediate_outputs=False, classifier_free_guidance_scale=classifier_free_guidance_scale
+        x=noise, 
+        conditioning_embeding=conditioning_embeding, 
+        intermediate_outputs=False, 
+        classifier_free_guidance_scale=classifier_free_guidance_scale
     )
 
     fake_velocity = torch.clip(fake_velocity, -1, 1)

@@ -1,10 +1,11 @@
+import os
+
 import torch
 import numpy as np
 import pretty_midi
 import pandas as pd
 import torch.nn as nn
 import fortepyan as ff
-import os
 from omegaconf import OmegaConf
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -18,9 +19,11 @@ from models.reverse_diffusion import Unet
 from models.forward_diffusion import ForwardDiffusion
 from models.velocity_time_encoder import VelocityTimeEncoder
 
+
 def makedir_if_not_exists(dir: str):
     if not os.path.exists(dir):
         os.makedirs(dir)
+
 
 def preprocess_dataset(dataset_name: str, batch_size: int, num_workers: int):
     ds = load_dataset(dataset_name, split="validation")
@@ -110,18 +113,18 @@ def compare_original_and_generated(
 
     if conditioning_model is not None:
         with torch.no_grad():
-            label_emb = conditioning_model(velocity_bin, dstart_bin, duration_bin)
+            conditioning_embeding = conditioning_model(velocity_bin, dstart_bin, duration_bin)
     else:
-        label_emb = None
+        conditioning_embeding = None
 
     noise = torch.randn(velocity.size()).to(cfg.train.device)
 
     # sample velocities from standard and ema model
     fake_velocity = gen.sample(
-        noise, label_emb=label_emb, intermediate_outputs=False, classifier_free_guidance_scale=classifier_free_guidance_scale
+        noise, conditioning_embeding=conditioning_embeding, intermediate_outputs=False, classifier_free_guidance_scale=classifier_free_guidance_scale
     )
     fake_velocity_ema = gen_ema.sample(
-        noise, label_emb=label_emb, intermediate_outputs=False, classifier_free_guidance_scale=classifier_free_guidance_scale
+        noise, conditioning_embeding=conditioning_embeding, intermediate_outputs=False, classifier_free_guidance_scale=classifier_free_guidance_scale
     )
 
     velocity = denormalize_velocity(velocity[0][0].numpy())

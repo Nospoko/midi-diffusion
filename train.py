@@ -27,30 +27,25 @@ def makedir_if_not_exists(dir: str):
         os.makedirs(dir)
 
 
-def preprocess_dataset(dataset_name: str | list[str], batch_size: int, num_workers: int, *, overfit_single_batch: bool = False):
+def preprocess_dataset(dataset_name: list[str], batch_size: int, num_workers: int, *, overfit_single_batch: bool = False):
     hf_token = os.environ["HUGGINGFACE_TOKEN"]
 
-    if isinstance(dataset_name, (list, ListConfig)):
-        train_ds = []
-        val_ds = []
-        test_ds = []
+    train_ds = []
+    val_ds = []
+    test_ds = []
 
-        for ds_name in dataset_name:
-            tr_ds = load_dataset(ds_name, split="train", use_auth_token=hf_token)
-            v_ds = load_dataset(ds_name, split="validation", use_auth_token=hf_token)
-            t_ds = load_dataset(ds_name, split="test", use_auth_token=hf_token)
+    for ds_name in dataset_name:
+        tr_ds = load_dataset(ds_name, split="train", use_auth_token=hf_token)
+        v_ds = load_dataset(ds_name, split="validation", use_auth_token=hf_token)
+        t_ds = load_dataset(ds_name, split="test", use_auth_token=hf_token)
 
-            train_ds.append(tr_ds)
-            val_ds.append(v_ds)
-            test_ds.append(t_ds)
+        train_ds.append(tr_ds)
+        val_ds.append(v_ds)
+        test_ds.append(t_ds)
 
-        train_ds = concatenate_datasets(train_ds)
-        val_ds = concatenate_datasets(val_ds)
-        test_ds = concatenate_datasets(test_ds)
-    else:
-        train_ds = load_dataset(dataset_name, split="train", use_auth_token=hf_token)
-        val_ds = load_dataset(dataset_name, split="validation", use_auth_token=hf_token)
-        test_ds = load_dataset(dataset_name, split="test", use_auth_token=hf_token)
+    train_ds = concatenate_datasets(train_ds)
+    val_ds = concatenate_datasets(val_ds)
+    test_ds = concatenate_datasets(test_ds)
 
     train_ds = MidiDataset(train_ds, augmentation_percentage=0.8)
     val_ds = MidiDataset(val_ds, augmentation_percentage=0.0)
@@ -76,29 +71,29 @@ def forward_step(
     batch: dict[str, torch.Tensor, torch.Tensor],
     device: torch.device,
 ) -> float:
-    x = batch["velocity"].to(device)
+    velocity = batch["velocity"].to(device)
 
     velocity_bin = batch["velocity_bin"].to(device)
     dstart_bin = batch["dstart_bin"].to(device)
     duration_bin = batch["duration_bin"].to(device)
 
-    batch_size = x.shape[0]
+    batch_size = velocity.shape[0]
 
     # sample t
     t = torch.randint(0, forward_diffusion.timesteps, size=(batch_size,), dtype=torch.long, device=device)
 
     # noise batch
-    x_noisy, added_noise = forward_diffusion(x, t)
+    x_noisy, added_noise = forward_diffusion(velocity, t)
 
     # conditional or unconditional
     if random.random() > 0.1:
         with torch.no_grad():
-            label_emb = conditioning_model(velocity_bin, dstart_bin, duration_bin)
+            conditioning_embeding = conditioning_model(velocity_bin, dstart_bin, duration_bin)
     else:
-        label_emb = None
+        conditioning_embeding = None
 
     # get predicted noise
-    predicted_noise = model(x_noisy, t, label_emb)
+    predicted_noise = model(x_noisy, t, conditioning_embeding)
 
     # get loss value for batch
     loss = F.mse_loss(predicted_noise, added_noise)
@@ -184,48 +179,29 @@ def train(cfg: OmegaConf):
     device = torch.device(cfg.train.device)
 
     # get trained conditioning model
-    if cfg.paths.cond_model_repo_id is not None and cfg.paths.cond_model_ckpt_path is not None:
-        cond_model_ckpt = torch.load(
-            hf_hub_download(repo_id=cfg.paths.cond_model_repo_id, filename=cfg.paths.cond_model_ckpt_path)
+    cond_model_ckpt = torch.load(
+        hf_hub_download(repo_id=cfg.paths.cond_model_repo_id, filename=cfg.paths.cond_model_ckpt_path)
+    )
+    cfg_cond_model = cond_model_ckpt["config"]
+
+    velocity_time_conditioning_model = (
+        VelocityTimeEncoder(
+            num_embeddings=cfg_cond_model.models.velocity_time_encoder.num_embeddings,
+            embedding_dim=cfg_cond_model.models.velocity_time_encoder.embedding_dim,
+            output_embedding_dim=cfg_cond_model.models.velocity_time_encoder.output_embedding_dim,
+            num_attn_blocks=cfg_cond_model.models.velocity_time_encoder.num_attn_blocks,
+            num_attn_heads=cfg_cond_model.models.velocity_time_encoder.num_attn_heads,
+            attn_ffn_expansion=cfg_cond_model.models.velocity_time_encoder.attn_ffn_expansion,
+            dropout_rate=cfg_cond_model.models.velocity_time_encoder.dropout_rate,
         )
-        cfg_cond_model = cond_model_ckpt["config"]
+        .eval()
+        .to(device)
+    )
 
-        velocity_time_conditioning_model = (
-            VelocityTimeEncoder(
-                num_embeddings=cfg_cond_model.models.velocity_time_encoder.num_embeddings,
-                embedding_dim=cfg_cond_model.models.velocity_time_encoder.embedding_dim,
-                output_embedding_dim=cfg_cond_model.models.velocity_time_encoder.output_embedding_dim,
-                num_attn_blocks=cfg_cond_model.models.velocity_time_encoder.num_attn_blocks,
-                num_attn_heads=cfg_cond_model.models.velocity_time_encoder.num_attn_heads,
-                attn_ffn_expansion=cfg_cond_model.models.velocity_time_encoder.attn_ffn_expansion,
-                dropout_rate=cfg_cond_model.models.velocity_time_encoder.dropout_rate,
-            )
-            .eval()
-            .to(device)
-        )
+    velocity_time_conditioning_model.load_state_dict(cond_model_ckpt["velocity_time_encoder"])
 
-        # pitch_conditioning_model = (
-        #     PitchEncoder(
-        #         num_embeddings=cfg_cond_model.models.pitch_encoder.num_embeddings,
-        #         embedding_dim=cfg_cond_model.models.pitch_encoder.embedding_dim,
-        #         output_embedding_dim=cfg_cond_model.models.pitch_encoder.output_embedding_dim,
-        #         num_attn_blocks=cfg_cond_model.models.pitch_encoder.num_attn_blocks,
-        #         num_attn_heads=cfg_cond_model.models.pitch_encoder.num_attn_heads,
-        #         attn_ffn_expansion=cfg_cond_model.models.pitch_encoder.attn_ffn_expansion,
-        #         dropout_rate=cfg_cond_model.models.pitch_encoder.dropout_rate,
-        #     )
-        #     .eval()
-        #     .to(device)
-        # )
-
-        velocity_time_conditioning_model.load_state_dict(cond_model_ckpt["velocity_time_encoder"])
-        # pitch_conditioning_model.load_state_dict(cond_model_ckpt["pitch_encoder"])
-
-        # freeze layers
-        velocity_time_conditioning_model.requires_grad_(False)
-        # pitch_conditioning_model.requires_grad_(False)
-
-        # conditioning_models = [velocity_time_conditioning_model, pitch_conditioning_model]
+    # freeze layers
+    velocity_time_conditioning_model.requires_grad_(False)
 
     # model
     unet = Unet(
