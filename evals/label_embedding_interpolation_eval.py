@@ -161,12 +161,12 @@ def eval_interpolation(
     model_ema_midi = model_ema_piece.to_midi()
 
     # save as mp3
-    render_midi_to_mp3(original_midi, f"tmp/mp3/{filename}-simple-interpolation.mp3")
+    render_midi_to_mp3(original_midi, f"tmp/mp3/{filename}-original.mp3")
     render_midi_to_mp3(model_midi, f"tmp/mp3/{filename}-model.mp3")
     render_midi_to_mp3(model_ema_midi, f"tmp/mp3/{filename}-model-ema.mp3")
 
     # save as midi
-    original_midi.write(f"tmp/midi/{filename}-simple-interpolation.midi")
+    original_midi.write(f"tmp/midi/{filename}-original.midi")
     model_midi.write(f"tmp/midi/{filename}-model.midi")
     model_ema_midi.write(f"tmp/midi/{filename}-model-ema.midi")
 

@@ -137,6 +137,9 @@ def compare_original_and_generated(
     fake_velocity = denormalize_velocity(fake_velocity[0][0].cpu().numpy())
     fake_velocity_ema = denormalize_velocity(fake_velocity_ema[0][0].cpu().numpy())
 
+    fake_velocity = torch.clip(fake_velocity, -1, 1)
+    fake_velocity_ema = torch.clip(fake_velocity_ema, -1, 1)
+
     original_piece = to_midi_piece(pitch, dstart, duration, velocity)
     model_piece = to_midi_piece(pitch, dstart, duration, fake_velocity)
     model_ema_piece = to_midi_piece(pitch, dstart, duration, fake_velocity_ema)

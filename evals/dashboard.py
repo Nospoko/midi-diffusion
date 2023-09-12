@@ -1,6 +1,7 @@
-import streamlit as st
 import glob
+
 import fortepyan as ff
+import streamlit as st
 
 
 def display_audio(title, midi_files: list[str], mp3_files: list[str]):
@@ -26,8 +27,16 @@ def main():
 
     selected_filename = st.selectbox("Select piece to display", options=filenames)
 
-    selected_midi = [f"tmp/midi/{selected_filename}-original.midi", f"tmp/midi/{selected_filename}-model.midi", f"tmp/midi/{selected_filename}-model-ema.midi"]
-    selected_mp3 = [f"tmp/mp3/{selected_filename}-original.mp3", f"tmp/mp3/{selected_filename}-model.mp3", f"tmp/mp3/{selected_filename}-model-ema.mp3"]
+    selected_midi = [
+        f"tmp/midi/{selected_filename}-original.midi",
+        f"tmp/midi/{selected_filename}-model.midi",
+        f"tmp/midi/{selected_filename}-model-ema.midi",
+    ]
+    selected_mp3 = [
+        f"tmp/mp3/{selected_filename}-original.mp3",
+        f"tmp/mp3/{selected_filename}-model.mp3",
+        f"tmp/mp3/{selected_filename}-model-ema.mp3",
+    ]
 
     display_audio(
         title=selected_filename,
