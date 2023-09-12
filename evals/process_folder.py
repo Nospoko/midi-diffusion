@@ -1,15 +1,15 @@
 import os
+import argparse
 
 import torch
 import numpy as np
-import pretty_midi
 import pandas as pd
 import torch.nn as nn
 import fortepyan as ff
 from omegaconf import OmegaConf
 from datasets import load_dataset
-from fortepyan.audio import render as render_audio
 from huggingface_hub.file_download import hf_hub_download
+from tqdm import tqdm
 
 from sample import Generator
 from data.quantizer import MidiQuantizer
@@ -23,17 +23,8 @@ def makedir_if_not_exists(dir: str):
         os.makedirs(dir)
 
 
-def get_maestro_record(query: str | int):
-    ds = load_dataset("roszcz/maestro-v1-sustain", split="validation")
+def process_record(record: dict, seq_len: int = 1024):
     quantizer = MidiQuantizer(7, 7, 7)
-
-    if isinstance(query, int):
-        record = ds[query]
-    else:
-        idx_query = [i for i, record in enumerate(ds) if str.lower(query) in str.lower(f"{record['composer']} {record['title']}")]
-        # get first record
-        idx = idx_query[0]
-        record = ds[idx]
 
     midi_filename = f"{record['composer']} {record['title']}"
     piece = ff.MidiPiece.from_huggingface(record)
@@ -45,13 +36,13 @@ def get_maestro_record(query: str | int):
 
     sequence = {
         "filename": midi_filename,
-        "pitch": torch.tensor(piece.df.pitch, dtype=torch.long)[:1024],
-        "dstart": torch.tensor(piece.df.dstart, dtype=torch.float)[:1024],
-        "duration": torch.tensor(piece.df.duration, dtype=torch.float)[:1024],
-        "velocity": (torch.tensor(piece.df.velocity, dtype=torch.float)[None, None, :1024] / 64) - 1,
-        "dstart_bin": torch.tensor(piece_quantized.df.dstart_bin, dtype=torch.long)[None, :1024],
-        "duration_bin": torch.tensor(piece_quantized.df.duration_bin, dtype=torch.long)[None, :1024],
-        "velocity_bin": torch.tensor(piece_quantized.df.velocity_bin, dtype=torch.long)[None, :1024],
+        "pitch": torch.tensor(piece.df.pitch, dtype=torch.long)[:seq_len],
+        "dstart": torch.tensor(piece.df.dstart, dtype=torch.float)[:seq_len],
+        "duration": torch.tensor(piece.df.duration, dtype=torch.float)[:seq_len],
+        "velocity": (torch.tensor(piece.df.velocity, dtype=torch.float)[None, None, :seq_len] / 64) - 1,
+        "dstart_bin": torch.tensor(piece_quantized.df.dstart_bin, dtype=torch.long)[None, :seq_len],
+        "duration_bin": torch.tensor(piece_quantized.df.duration_bin, dtype=torch.long)[None, :seq_len],
+        "velocity_bin": torch.tensor(piece_quantized.df.velocity_bin, dtype=torch.long)[None, :seq_len],
     }
 
     return sequence
@@ -76,17 +67,16 @@ def to_midi_piece(pitch: np.ndarray, dstart: np.ndarray, duration: np.ndarray, v
     return ff.MidiPiece(df)
 
 
-def compare_original_and_generated(
+def process_original_and_generated(
     gen: Generator,
     gen_ema: Generator,
-    query: str | int,
+    record: dict,
     cfg: OmegaConf,
+    save_dir: str,
     conditioning_model: nn.Module = None,
     classifier_free_guidance_scale: float = 3.0,
 ):
-    # loader = preprocess_dataset("JasiekKaczmarczyk/maestro-sustain-quantized", batch_size, 1)
-
-    batch = get_maestro_record(query)
+    batch = process_record(record, seq_len=1024)
 
     # grab only name without extension
     filename = batch["filename"]
@@ -103,33 +93,32 @@ def compare_original_and_generated(
 
     if conditioning_model is not None:
         with torch.no_grad():
-            conditioning_embeding = conditioning_model(velocity_bin, dstart_bin, duration_bin)
+            conditioning_embedding = conditioning_model(velocity_bin, dstart_bin, duration_bin)
     else:
-        conditioning_embeding = None
+        conditioning_embedding = None
 
     noise = torch.randn(velocity.size()).to(cfg.train.device)
 
     # sample velocities from standard and ema model
     fake_velocity = gen.sample(
         noise,
-        conditioning_embeding=conditioning_embeding,
+        conditioning_embeding=conditioning_embedding,
         intermediate_outputs=False,
         classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
     fake_velocity_ema = gen_ema.sample(
         noise,
-        conditioning_embeding=conditioning_embeding,
+        conditioning_embeding=conditioning_embedding,
         intermediate_outputs=False,
         classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
-    
+
     fake_velocity = torch.clip(fake_velocity, -1, 1)
     fake_velocity_ema = torch.clip(fake_velocity_ema, -1, 1)
 
     velocity = denormalize_velocity(velocity[0][0].numpy())
     fake_velocity = denormalize_velocity(fake_velocity[0][0].cpu().numpy())
     fake_velocity_ema = denormalize_velocity(fake_velocity_ema[0][0].cpu().numpy())
-
 
     original_piece = to_midi_piece(pitch, dstart, duration, velocity)
     model_piece = to_midi_piece(pitch, dstart, duration, fake_velocity)
@@ -139,26 +128,18 @@ def compare_original_and_generated(
     model_midi = model_piece.to_midi()
     model_ema_midi = model_ema_piece.to_midi()
 
-    # save as mp3
-    render_midi_to_mp3(original_midi, f"tmp/mp3/{filename}-original.mp3")
-    render_midi_to_mp3(model_midi, f"tmp/mp3/{filename}-model.mp3")
-    render_midi_to_mp3(model_ema_midi, f"tmp/mp3/{filename}-model-ema.mp3")
-
     # save as midi
-    original_midi.write(f"tmp/midi/{filename}-original.midi")
-    model_midi.write(f"tmp/midi/{filename}-model.midi")
-    model_ema_midi.write(f"tmp/midi/{filename}-model-ema.midi")
+    original_midi.write(f"{save_dir}/{filename}-original.midi")
+    model_midi.write(f"{save_dir}/{filename}-model.midi")
+    model_ema_midi.write(f"{save_dir}/{filename}-model-ema.midi")
 
 
-def render_midi_to_mp3(midi_file: pretty_midi.PrettyMIDI, filepath: str) -> str:
-    render_audio.midi_to_mp3(midi_file, filepath)
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--save_dir", type=str, default="tmp/midi")
+    args = parser.parse_args()
 
-    return filepath
-
-
-if __name__ == "__main__":
-    makedir_if_not_exists("tmp/mp3")
-    makedir_if_not_exists("tmp/midi")
+    makedir_if_not_exists(args.save_dir)
 
     checkpoint = torch.load(
         hf_hub_download("JasiekKaczmarczyk/midi-diffusion", filename="midi-diffusion-2023-09-07-11-10-params-15.27M.ckpt")
@@ -218,6 +199,18 @@ if __name__ == "__main__":
     gen = Generator(model, forward_diffusion)
     gen_ema = Generator(ema_model, forward_diffusion)
 
-    query = "Chopin"
+    dataset = load_dataset("roszcz/maestro-v1-sustain", split="validation")
 
-    compare_original_and_generated(gen, gen_ema, query, cfg, conditioning_model)
+    for record in tqdm(dataset, total=dataset.num_rows):
+        process_original_and_generated(
+            gen=gen, 
+            gen_ema=gen_ema, 
+            record=record, 
+            cfg=cfg, 
+            save_dir=args.save_dir, 
+            conditioning_model=conditioning_model
+        )
+
+
+if __name__ == "__main__":
+    main()

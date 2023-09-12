@@ -27,7 +27,7 @@ class Generator:
             timesteps = self.forward_diffusion.timesteps
 
         # reversing diffusion process
-        for i in tqdm(reversed(range(timesteps)), total=timesteps):
+        for i in tqdm(reversed(range(timesteps)), total=timesteps, leave=False):
             # generating timestep tensor of size (batch_size, )
             t = torch.ones(x.shape[0], device=x.device, dtype=torch.long) * i
 
