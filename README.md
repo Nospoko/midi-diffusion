@@ -10,11 +10,10 @@ python train.py --config-name config-default
 
 ```mermaid
 flowchart TD
-    A[MIDI Sequence] --> B(quantized piece)
+    A[MIDI Sequence] --> B(frozen conditioning model)
     A --> C(velocity)
     C --> D(velocity diffusion)
     B --> E(encoded)
-    G(conditional_embedding) --> F
     E --> F(noise prediction)
     D --> F 
 ```
