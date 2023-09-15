@@ -122,14 +122,13 @@ def compare_original_and_generated(
         intermediate_outputs=False,
         classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
-    
+
     fake_velocity = torch.clip(fake_velocity, -1, 1)
     fake_velocity_ema = torch.clip(fake_velocity_ema, -1, 1)
 
     velocity = denormalize_velocity(velocity[0][0].numpy())
     fake_velocity = denormalize_velocity(fake_velocity[0][0].cpu().numpy())
     fake_velocity_ema = denormalize_velocity(fake_velocity_ema[0][0].cpu().numpy())
-
 
     original_piece = to_midi_piece(pitch, dstart, duration, velocity)
     model_piece = to_midi_piece(pitch, dstart, duration, fake_velocity)

@@ -13,7 +13,6 @@ from huggingface_hub import upload_file
 from torch.utils.data import Subset, DataLoader
 from datasets import load_dataset, concatenate_datasets
 from huggingface_hub.file_download import hf_hub_download
-from transformers import RobertaConfig, RobertaForMaskedLM
 
 from data.dataset import MidiDataset
 from models.reverse_diffusion import Unet
@@ -264,14 +263,15 @@ def train(cfg: OmegaConf):
             # applying exponential moving average
             ema.update(unet)
 
-            train_loop.set_postfix(loss=loss.item())
+            loss_item = loss.item()
+            train_loop.set_postfix(loss=loss_item)
 
             step_count += 1
             loss_epoch += loss.item()
 
             if (batch_idx + 1) % cfg.logger.log_every_n_steps == 0:
                 # log metrics
-                wandb.log({"train/loss": loss.item()}, step=step_count)
+                wandb.log({"train/loss": loss_item}, step=step_count)
 
                 # save model and optimizer states
                 save_checkpoint(unet, ema.ema_model, forward_diffusion, optimizer, cfg, save_path=save_path)

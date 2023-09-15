@@ -6,10 +6,10 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import fortepyan as ff
+from tqdm import tqdm
 from omegaconf import OmegaConf
 from datasets import load_dataset
 from huggingface_hub.file_download import hf_hub_download
-from tqdm import tqdm
 
 from sample import Generator
 from data.quantizer import MidiQuantizer
@@ -203,12 +203,7 @@ def main():
 
     for record in tqdm(dataset, total=dataset.num_rows):
         process_original_and_generated(
-            gen=gen, 
-            gen_ema=gen_ema, 
-            record=record, 
-            cfg=cfg, 
-            save_dir=args.save_dir, 
-            conditioning_model=conditioning_model
+            gen=gen, gen_ema=gen_ema, record=record, cfg=cfg, save_dir=args.save_dir, conditioning_model=conditioning_model
         )
 
 
