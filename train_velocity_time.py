@@ -13,6 +13,7 @@ from huggingface_hub import upload_file
 from torch.utils.data import Subset, DataLoader
 from datasets import load_dataset, concatenate_datasets
 from huggingface_hub.file_download import hf_hub_download
+from transformers import RobertaConfig, RobertaForMaskedLM
 
 from data.dataset import MidiDataset
 from models.reverse_diffusion import Unet
@@ -71,18 +72,23 @@ def forward_step(
     device: torch.device,
 ) -> float:
     velocity = batch["velocity"].to(device)
+    dstart = batch["dstart"].to(device)
+    duration = batch["duration"].to(device)
+
+    # shape: [batch_size, channels, seq_len]
+    attributes = torch.cat([velocity, dstart, duration], dim=1)
 
     velocity_bin = batch["velocity_bin"].to(device)
     dstart_bin = batch["dstart_bin"].to(device)
     duration_bin = batch["duration_bin"].to(device)
 
-    batch_size = velocity.shape[0]
+    batch_size = attributes.shape[0]
 
     # sample t
     t = torch.randint(0, forward_diffusion.timesteps, size=(batch_size,), dtype=torch.long, device=device)
 
     # noise batch
-    x_noisy, added_noise = forward_diffusion(velocity, t)
+    x_noisy, added_noise = forward_diffusion(attributes, t)
 
     # conditional or unconditional
     if random.random() > 0.1:
@@ -148,7 +154,7 @@ def upload_to_huggingface(ckpt_save_path: str, cfg: OmegaConf):
     upload_file(ckpt_save_path, path_in_repo=f"{cfg.logger.run_name}.ckpt", repo_id=cfg.paths.hf_repo_id, token=token)
 
 
-@hydra.main(config_path="configs", config_name="config-default", version_base="1.3.2")
+@hydra.main(config_path="configs", config_name="config-velocity-time", version_base="1.3.2")
 def train(cfg: OmegaConf):
     wandb.login()
 
