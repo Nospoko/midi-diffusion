@@ -3,7 +3,7 @@ hydra:
     chdir: False
 
 train:
-  dataset_name: "JasiekKaczmarczyk/giant-midi-sustain-quantized" # huggingface dataset
+  dataset_name: ["JasiekKaczmarczyk/giant-midi-sustain-quantized"] # huggingface dataset
   batch_size: 16
   num_workers: 1
   lr: 3e-4

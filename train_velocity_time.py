@@ -1,6 +1,7 @@
 import os
 import random
 
+import json
 import hydra
 import torch
 import wandb
@@ -62,6 +63,10 @@ def preprocess_dataset(dataset_name: list[str], batch_size: int, num_workers: in
 
     return train_dataloader, val_dataloader, test_dataloader
 
+def normalize_time_features(time_feature: torch.Tensor, mean: float, std: float):
+    log2_x = torch.log2(time_feature)
+
+    return (log2_x - mean) / std
 
 def forward_step(
     model: Unet,
@@ -69,20 +74,41 @@ def forward_step(
     conditioning_model: nn.Module,
     batch: dict[str, torch.Tensor, torch.Tensor],
     device: torch.device,
+    time_normalization_features: dict,
 ) -> float:
     velocity = batch["velocity"].to(device)
+    dstart = batch["dstart"].to(device)
+    duration = batch["duration"].to(device)
+
+    # for numerical stability when dstart is 0
+    dstart = dstart + (2 ** -5)
+
+    # normalizing time features by applying log2 and then standarization with precalculated mean and std
+    dstart = normalize_time_features(
+        dstart, 
+        mean=time_normalization_features["mean_dstart"],
+        std=time_normalization_features["std_dstart"],
+    )
+    duration = normalize_time_features(
+        duration,
+        mean=time_normalization_features["mean_duration"],
+        std=time_normalization_features["std_duration"],
+    )
+
+    # shape: [batch_size, channels, seq_len]
+    attributes = torch.cat([velocity, dstart, duration], dim=1)
 
     velocity_bin = batch["velocity_bin"].to(device)
     dstart_bin = batch["dstart_bin"].to(device)
     duration_bin = batch["duration_bin"].to(device)
 
-    batch_size = velocity.shape[0]
+    batch_size = attributes.shape[0]
 
     # sample t
     t = torch.randint(0, forward_diffusion.timesteps, size=(batch_size,), dtype=torch.long, device=device)
 
     # noise batch
-    x_noisy, added_noise = forward_diffusion(velocity, t)
+    x_noisy, added_noise = forward_diffusion(attributes, t)
 
     # conditional or unconditional
     if random.random() > 0.1:
@@ -107,6 +133,7 @@ def validation_epoch(
     conditioning_model: nn.Module,
     dataloader: DataLoader,
     device: torch.device,
+    time_normalization_features: dict,
 ) -> dict:
     # val epoch
     val_loop = tqdm(enumerate(dataloader), total=len(dataloader), leave=False)
@@ -114,7 +141,7 @@ def validation_epoch(
 
     for batch_idx, batch in val_loop:
         # metrics returns loss and additional metrics if specified in step function
-        loss = forward_step(model, forward_diffusion, conditioning_model, batch, device)
+        loss = forward_step(model, forward_diffusion, conditioning_model, batch, device, time_normalization_features)
 
         val_loop.set_postfix(loss=loss.item())
 
@@ -148,7 +175,7 @@ def upload_to_huggingface(ckpt_save_path: str, cfg: OmegaConf):
     upload_file(ckpt_save_path, path_in_repo=f"{cfg.logger.run_name}.ckpt", repo_id=cfg.paths.hf_repo_id, token=token)
 
 
-@hydra.main(config_path="configs", config_name="config-default", version_base="1.3.2")
+@hydra.main(config_path="configs", config_name="config-velocity-time", version_base="1.3.2")
 def train(cfg: OmegaConf):
     wandb.login()
 
@@ -238,6 +265,8 @@ def train(cfg: OmegaConf):
     num_params_millions = sum([p.numel() for p in unet.parameters()]) / 1_000_000
     save_path = f"{cfg.paths.save_ckpt_dir}/{cfg.logger.run_name}-params-{num_params_millions:.2f}M.ckpt"
 
+    time_normalization_features = json.load(open("artifacts/time_features.json"))
+
     # step counts for logging to wandb
     step_count = 0
 
@@ -249,7 +278,7 @@ def train(cfg: OmegaConf):
 
         for batch_idx, batch in train_loop:
             # metrics returns loss and additional metrics if specified in step function
-            loss = forward_step(unet, forward_diffusion, velocity_time_conditioning_model, batch, device)
+            loss = forward_step(unet, forward_diffusion, velocity_time_conditioning_model, batch, device, time_normalization_features)
 
             optimizer.zero_grad()
             loss.backward()
@@ -258,14 +287,15 @@ def train(cfg: OmegaConf):
             # applying exponential moving average
             ema.update(unet)
 
-            train_loop.set_postfix(loss=loss.item())
+            loss_item = loss.item()
+            train_loop.set_postfix(loss=loss_item)
 
             step_count += 1
             loss_epoch += loss.item()
 
             if (batch_idx + 1) % cfg.logger.log_every_n_steps == 0:
                 # log metrics
-                wandb.log({"train/loss": loss.item()}, step=step_count)
+                wandb.log({"train/loss": loss_item}, step=step_count)
 
                 # save model and optimizer states
                 save_checkpoint(unet, ema.ema_model, forward_diffusion, optimizer, cfg, save_path=save_path)
@@ -281,6 +311,7 @@ def train(cfg: OmegaConf):
             velocity_time_conditioning_model,
             val_dataloader,
             device,
+            time_normalization_features,
         )
         val_metrics = {"val/" + key: value for key, value in val_metrics.items()}
 
@@ -290,6 +321,7 @@ def train(cfg: OmegaConf):
             velocity_time_conditioning_model,
             val_dataloader,
             device,
+            time_normalization_features,
         )
         val_metrics_ema = {"val/" + key + "_ema": value for key, value in val_metrics_ema.items()}
 
@@ -300,6 +332,7 @@ def train(cfg: OmegaConf):
             velocity_time_conditioning_model,
             maestro_test,
             device,
+            time_normalization_features,
         )
         test_metrics = {"maestro/" + key: value for key, value in test_metrics.items()}
 
@@ -309,6 +342,7 @@ def train(cfg: OmegaConf):
             velocity_time_conditioning_model,
             maestro_test,
             device,
+            time_normalization_features,
         )
         test_metrics_ema = {"maestro/" + key + "_ema": value for key, value in test_metrics_ema.items()}
 

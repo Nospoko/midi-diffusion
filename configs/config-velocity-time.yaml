@@ -3,8 +3,8 @@ hydra:
     chdir: False
 
 train:
-  dataset_name: ["JasiekKaczmarczyk/giant-midi-sustain-quantized"] # huggingface dataset
-  batch_size: 512
+  dataset_name: ["JasiekKaczmarczyk/giant-midi-sustain-quantized", "roszcz/pfa-sustain-quantized-7-7-7", "JasiekKaczmarczyk/maestro-sustain-quantized"] # huggingface dataset
+  batch_size: 1024
   num_workers: 8
   lr: 3e-4
   weight_decay: 0.01
@@ -23,7 +23,7 @@ paths:
 
 models:
   unet:
-    in_out_channels: 1 # input and output channels
+    in_out_channels: 3 # input and output channels
     dim: 64 # initial number of unet channels (will be multiplied by dim_mults)
     dim_mults: [1, 2, 4, 4]
     kernel_size: 7
@@ -35,5 +35,5 @@ models:
     schedule_type: "sigmoid" # schedule type: cosine, linear, quadratic, sigmoid
 
 logger:
-  run_name: midi-diffusion-${now:%Y-%m-%d-%H-%M}
+  run_name: midi-diffusion-velocity-time-${now:%Y-%m-%d-%H-%M}
   log_every_n_steps: 50

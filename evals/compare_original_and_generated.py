@@ -1,5 +1,5 @@
 import os
-
+import json
 import torch
 import numpy as np
 import pretty_midi
@@ -46,8 +46,8 @@ def get_maestro_record(query: str | int):
     sequence = {
         "filename": midi_filename,
         "pitch": torch.tensor(piece.df.pitch, dtype=torch.long)[:1024],
-        "dstart": torch.tensor(piece.df.dstart, dtype=torch.float)[:1024],
-        "duration": torch.tensor(piece.df.duration, dtype=torch.float)[:1024],
+        "dstart": torch.tensor(piece.df.dstart, dtype=torch.float)[None, None, :1024],
+        "duration": torch.tensor(piece.df.duration, dtype=torch.float)[None, None, :1024],
         "velocity": (torch.tensor(piece.df.velocity, dtype=torch.float)[None, None, :1024] / 64) - 1,
         "dstart_bin": torch.tensor(piece_quantized.df.dstart_bin, dtype=torch.long)[None, :1024],
         "duration_bin": torch.tensor(piece_quantized.df.duration_bin, dtype=torch.long)[None, :1024],
@@ -122,7 +122,7 @@ def compare_original_and_generated(
         intermediate_outputs=False,
         classifier_free_guidance_scale=classifier_free_guidance_scale,
     )
-    
+
     fake_velocity = torch.clip(fake_velocity, -1, 1)
     fake_velocity_ema = torch.clip(fake_velocity_ema, -1, 1)
 
@@ -130,10 +130,120 @@ def compare_original_and_generated(
     fake_velocity = denormalize_velocity(fake_velocity[0][0].cpu().numpy())
     fake_velocity_ema = denormalize_velocity(fake_velocity_ema[0][0].cpu().numpy())
 
-
     original_piece = to_midi_piece(pitch, dstart, duration, velocity)
     model_piece = to_midi_piece(pitch, dstart, duration, fake_velocity)
     model_ema_piece = to_midi_piece(pitch, dstart, duration, fake_velocity_ema)
+
+    original_midi = original_piece.to_midi()
+    model_midi = model_piece.to_midi()
+    model_ema_midi = model_ema_piece.to_midi()
+
+    # save as mp3
+    render_midi_to_mp3(original_midi, f"tmp/mp3/{filename}-original.mp3")
+    render_midi_to_mp3(model_midi, f"tmp/mp3/{filename}-model.mp3")
+    render_midi_to_mp3(model_ema_midi, f"tmp/mp3/{filename}-model-ema.mp3")
+
+    # save as midi
+    original_midi.write(f"tmp/midi/{filename}-original.midi")
+    model_midi.write(f"tmp/midi/{filename}-model.midi")
+    model_ema_midi.write(f"tmp/midi/{filename}-model-ema.midi")
+
+
+def denormalize_time_features(time_feature: np.ndarray, mean: float, std: float):
+    log2_x = std * time_feature + mean
+
+    return 2 ** log2_x
+
+def compare_original_and_generated_velocity_and_time(
+    gen: Generator,
+    gen_ema: Generator,
+    query: str | int,
+    cfg: OmegaConf,
+    conditioning_model: nn.Module = None,
+    classifier_free_guidance_scale: float = 3.0,
+):
+    # loader = preprocess_dataset("JasiekKaczmarczyk/maestro-sustain-quantized", batch_size, 1)
+
+    batch = get_maestro_record(query)
+
+    # grab only name without extension
+    filename = batch["filename"]
+
+    # unpack other attributes
+    pitch = batch["pitch"].numpy()
+    dstart = batch["dstart"]
+    duration = batch["duration"]
+    velocity = batch["velocity"]
+
+    features = torch.cat([velocity, dstart, duration], dim=1)
+
+    velocity_bin = batch["velocity_bin"].to(cfg.train.device)
+    dstart_bin = batch["dstart_bin"].to(cfg.train.device)
+    duration_bin = batch["duration_bin"].to(cfg.train.device)
+
+    if conditioning_model is not None:
+        with torch.no_grad():
+            conditioning_embeding = conditioning_model(velocity_bin, dstart_bin, duration_bin)
+    else:
+        conditioning_embeding = None
+
+    noise = torch.randn(features.size()).to(cfg.train.device)
+
+    # sample velocities from standard and ema model
+    fake_features = gen.sample(
+        noise,
+        conditioning_embeding=conditioning_embeding,
+        intermediate_outputs=False,
+        classifier_free_guidance_scale=classifier_free_guidance_scale,
+    )
+    fake_features_ema = gen_ema.sample(
+        noise,
+        conditioning_embeding=conditioning_embeding,
+        intermediate_outputs=False,
+        classifier_free_guidance_scale=classifier_free_guidance_scale,
+    )
+
+    # unpack attributes
+
+    fake_velocity, fake_dstart, fake_duration = torch.chunk(fake_features, chunks=3, dim=1)
+    fake_velocity_ema, fake_dstart_ema, fake_duration_ema = torch.chunk(fake_features_ema, chunks=3, dim=1)
+
+    time_features = json.load(open("artifacts/time_features.json"))
+
+    fake_velocity = torch.clip(fake_velocity, -1, 1)
+    fake_velocity_ema = torch.clip(fake_velocity_ema, -1, 1)
+
+    fake_dstart = denormalize_time_features(
+        fake_dstart[0][0].cpu().numpy(), 
+        mean=time_features["mean_dstart"], 
+        std=time_features["std_dstart"],
+    )
+    fake_dstart_ema = denormalize_time_features(
+        fake_dstart_ema[0][0].cpu().numpy(), 
+        mean=time_features["mean_dstart"], 
+        std=time_features["std_dstart"]
+    )
+    fake_duration = denormalize_time_features(
+        fake_duration[0][0].cpu().numpy(),
+        mean=time_features["mean_duration"], 
+        std=time_features["std_duration"],
+    )
+    fake_duration_ema = denormalize_time_features(
+        fake_duration_ema[0][0].cpu().numpy(),
+        mean=time_features["mean_duration"], 
+        std=time_features["std_duration"],
+    )
+
+    fake_dstart = fake_dstart - (2 ** -5)
+    fake_dstart_ema = fake_dstart_ema - (2 ** -5)
+
+    velocity = denormalize_velocity(velocity[0][0].numpy())
+    fake_velocity = denormalize_velocity(fake_velocity[0][0].cpu().numpy())
+    fake_velocity_ema = denormalize_velocity(fake_velocity_ema[0][0].cpu().numpy())
+
+    original_piece = to_midi_piece(pitch, dstart[0][0].numpy(), duration[0][0].numpy(), velocity)
+    model_piece = to_midi_piece(pitch, fake_dstart, fake_duration, fake_velocity)
+    model_ema_piece = to_midi_piece(pitch, fake_dstart_ema, fake_duration_ema, fake_velocity_ema)
 
     original_midi = original_piece.to_midi()
     model_midi = model_piece.to_midi()
@@ -161,7 +271,8 @@ if __name__ == "__main__":
     makedir_if_not_exists("tmp/midi")
 
     checkpoint = torch.load(
-        hf_hub_download("JasiekKaczmarczyk/midi-diffusion", filename="midi-diffusion-2023-09-07-11-10-params-15.27M.ckpt")
+        # hf_hub_download("JasiekKaczmarczyk/midi-diffusion", filename="midi-diffusion-2023-09-07-11-10-params-15.27M.ckpt")
+        "checkpoints/midi-diffusion-velocity-time-2023-09-18-15-10-params-15.27M.ckpt"
     )
 
     cfg = checkpoint["config"]
@@ -220,4 +331,6 @@ if __name__ == "__main__":
 
     query = "Chopin"
 
-    compare_original_and_generated(gen, gen_ema, query, cfg, conditioning_model)
+    # compare_original_and_generated(gen, gen_ema, query, cfg, conditioning_model)
+
+    compare_original_and_generated_velocity_and_time(gen, gen_ema, query, cfg, conditioning_model)

@@ -58,6 +58,9 @@ class MidiDataset(Dataset):
         velocity = (np.array(sequence["velocity"]) / 64) - 1
         velocity_bin = np.array(sequence["velocity_bin"])
 
+        if np.any(np.isnan(dstart)):
+            dstart = np.nan_to_num(dstart)
+
         # shift pitch augmentation
         if random.random() < self.augmentation_percentage:
             # max shift is octave down or up

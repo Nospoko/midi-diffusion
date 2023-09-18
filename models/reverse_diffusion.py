@@ -13,7 +13,7 @@ class Unet(nn.Module):
         out_channels: int,
         dim: int,
         dim_mults: tuple[int] = (1, 2, 4, 8),
-        conditioning_embeding_dim: int = 128,
+        conditioning_embedding_dim: int = 128,
         kernel_size: int = 3,
         resnet_block_groups: int = 4,
     ):
@@ -24,7 +24,7 @@ class Unet(nn.Module):
         # get list of corresponding ins and outs
         self.ins_outs = list(zip(dims[:-1], dims[1:]))
         self.num_resolutions = len(self.ins_outs)
-        self.conditioning_embeding_dim = conditioning_embeding_dim
+        self.conditioning_embedding_dim = conditioning_embedding_dim
         self.kernel_size = kernel_size
         self.resnet_block_groups = resnet_block_groups
 
@@ -46,7 +46,7 @@ class Unet(nn.Module):
         mid_dim = dims[-1]
         self.mid_block_1 = ResnetBlock(mid_dim, mid_dim, kernel_size=kernel_size, time_emb_dim=self.time_dim)
         self.mid_attn = Residual(PreNorm(mid_dim, ConvMultiHeadAttention(mid_dim)))
-        self.mid_cross_attn = Residual(PreNorm(mid_dim, CrossAttention(mid_dim, self.conditioning_embeding_dim)))
+        self.mid_cross_attn = Residual(PreNorm(mid_dim, CrossAttention(mid_dim, self.conditioning_embedding_dim)))
         self.mid_block_2 = ResnetBlock(mid_dim, mid_dim, kernel_size=kernel_size, time_emb_dim=self.time_dim)
 
         # up blocks
@@ -74,7 +74,7 @@ class Unet(nn.Module):
                             ins, ins, kernel_size=self.kernel_size, time_emb_dim=self.time_dim, groups=self.resnet_block_groups
                         ),
                         Residual(PreNorm(ins, ConvMultiHeadAttention(ins))),
-                        Residual(PreNorm(ins, CrossAttention(ins, self.conditioning_embeding_dim))),
+                        Residual(PreNorm(ins, CrossAttention(ins, self.conditioning_embedding_dim))),
                         Downsample(ins, outs) if not is_last else nn.Conv1d(ins, outs, kernel_size=3, padding=1),
                     ]
                 )
@@ -106,7 +106,7 @@ class Unet(nn.Module):
                             groups=self.resnet_block_groups,
                         ),
                         Residual(PreNorm(outs, ConvMultiHeadAttention(outs))),
-                        Residual(PreNorm(outs, CrossAttention(outs, self.conditioning_embeding_dim))),
+                        Residual(PreNorm(outs, CrossAttention(outs, self.conditioning_embedding_dim))),
                         Upsample(outs, ins) if not is_last else nn.Conv1d(outs, ins, kernel_size=3, padding=1),
                     ]
                 )
@@ -114,7 +114,7 @@ class Unet(nn.Module):
 
         return up
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor, conditioning_embeding: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, t: torch.Tensor, conditioning_embedding: torch.Tensor = None) -> torch.Tensor:
         # time embedding
         t_emb = self.time_mlp(t)
 
@@ -133,8 +133,8 @@ class Unet(nn.Module):
             x = block_2(x, t_emb)
             x = attn(x)
 
-            if conditioning_embeding is not None:
-                x = cross_attn(x, conditioning_embeding, conditioning_embeding)
+            if conditioning_embedding is not None:
+                x = cross_attn(x, conditioning_embedding, conditioning_embedding)
 
             residual_connections.append(x)
 
@@ -144,8 +144,8 @@ class Unet(nn.Module):
         x = self.mid_block_1(x, t_emb)
         x = self.mid_attn(x)
 
-        if conditioning_embeding is not None:
-            x = self.mid_cross_attn(x, conditioning_embeding, conditioning_embeding)
+        if conditioning_embedding is not None:
+            x = self.mid_cross_attn(x, conditioning_embedding, conditioning_embedding)
 
         x = self.mid_block_2(x, t_emb)
 
@@ -158,8 +158,8 @@ class Unet(nn.Module):
             x = block_2(x, t_emb)
             x = attn(x)
 
-            if conditioning_embeding is not None:
-                x = cross_attn(x, conditioning_embeding, conditioning_embeding)
+            if conditioning_embedding is not None:
+                x = cross_attn(x, conditioning_embedding, conditioning_embedding)
 
             x = upsample(x)
 

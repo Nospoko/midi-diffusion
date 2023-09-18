@@ -15,6 +15,7 @@ def process_record(piece: ff.MidiPiece, sequence_len: int, quantizer: MidiQuanti
 
     piece.df["next_start"] = piece.df.start.shift(-1)
     piece.df["dstart"] = piece.df.next_start - piece.df.start
+    piece.df["dstart"].fillna(0, inplace=True)
 
     record = []
 
